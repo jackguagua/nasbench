@@ -99,310 +99,310 @@ from nasbench.lib import evaluate
 from nasbench.lib import model_metrics_pb2
 from nasbench.lib import model_spec as _model_spec
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 # Bring ModelSpec to top-level for convenience. See lib/model_spec.py.
 ModelSpec = _model_spec.ModelSpec
 
 
 class OutOfDomainError(Exception):
-  """Indicates that the requested graph is outside of the search domain."""
+    """Indicates that the requested graph is outside of the search domain."""
 
 
 class NASBench(object):
-  """User-facing API for accessing the NASBench dataset."""
+    """User-facing API for accessing the NASBench dataset."""
 
-  def __init__(self, dataset_file, seed=None):
-    """Initialize dataset, this should only be done once per experiment.
+    def __init__(self, dataset_file, seed=None):
+        """Initialize dataset, this should only be done once per experiment.
 
-    Args:
-      dataset_file: path to .tfrecord file containing the dataset.
-      seed: random seed used for sampling queried models. Two NASBench objects
-        created with the same seed will return the same data points when queried
-        with the same models in the same order. By default, the seed is randomly
-        generated.
-    """
-    self.config = config.build_config()
-    random.seed(seed)
+        Args:
+          dataset_file: path to .tfrecord file containing the dataset.
+          seed: random seed used for sampling queried models. Two NASBench objects
+            created with the same seed will return the same data points when queried
+            with the same models in the same order. By default, the seed is randomly
+            generated.
+        """
+        self.config = config.build_config()
+        random.seed(seed)
 
-    print('Loading dataset from file... This may take a few minutes...')
-    start = time.time()
+        print('Loading dataset from file... This may take a few minutes...')
+        start = time.time()
 
-    # Stores the fixed statistics that are independent of evaluation (i.e.,
-    # adjacency matrix, operations, and number of parameters).
-    # hash --> metric name --> scalar
-    self.fixed_statistics = {}
+        # Stores the fixed statistics that are independent of evaluation (i.e.,
+        # adjacency matrix, operations, and number of parameters).
+        # hash --> metric name --> scalar
+        self.fixed_statistics = {}
 
-    # Stores the statistics that are computed via training and evaluating the
-    # model on CIFAR-10. Statistics are computed for multiple repeats of each
-    # model at each max epoch length.
-    # hash --> epochs --> repeat index --> metric name --> scalar
-    self.computed_statistics = {}
+        # Stores the statistics that are computed via training and evaluating the
+        # model on CIFAR-10. Statistics are computed for multiple repeats of each
+        # model at each max epoch length.
+        # hash --> epochs --> repeat index --> metric name --> scalar
+        self.computed_statistics = {}
 
-    # Valid queriable epoch lengths. {4, 12, 36, 108} for the full dataset or
-    # {108} for the smaller dataset with only the 108 epochs.
-    self.valid_epochs = set()
+        # Valid queriable epoch lengths. {4, 12, 36, 108} for the full dataset or
+        # {108} for the smaller dataset with only the 108 epochs.
+        self.valid_epochs = set()
 
-    for serialized_row in tf.python_io.tf_record_iterator(dataset_file):
-      # Parse the data from the data file.
-      module_hash, epochs, raw_adjacency, raw_operations, raw_metrics = (
-          json.loads(serialized_row.decode('utf-8')))
+        for serialized_row in tf.python_io.tf_record_iterator(dataset_file):
+            # Parse the data from the data file.
+            module_hash, epochs, raw_adjacency, raw_operations, raw_metrics = (
+                json.loads(serialized_row.decode('utf-8')))
 
-      dim = int(np.sqrt(len(raw_adjacency)))
-      adjacency = np.array([int(e) for e in list(raw_adjacency)], dtype=np.int8)
-      adjacency = np.reshape(adjacency, (dim, dim))
-      operations = raw_operations.split(',')
-      metrics = model_metrics_pb2.ModelMetrics.FromString(
-          base64.b64decode(raw_metrics))
+            dim = int(np.sqrt(len(raw_adjacency)))
+            adjacency = np.array([int(e) for e in list(raw_adjacency)], dtype=np.int8)
+            adjacency = np.reshape(adjacency, (dim, dim))
+            operations = raw_operations.split(',')
+            metrics = model_metrics_pb2.ModelMetrics.FromString(
+                base64.b64decode(raw_metrics))
 
-      if module_hash not in self.fixed_statistics:
-        # First time seeing this module, initialize fixed statistics.
-        new_entry = {}
-        new_entry['module_adjacency'] = adjacency
-        new_entry['module_operations'] = operations
-        new_entry['trainable_parameters'] = metrics.trainable_parameters
-        self.fixed_statistics[module_hash] = new_entry
-        self.computed_statistics[module_hash] = {}
+            if module_hash not in self.fixed_statistics:
+                # First time seeing this module, initialize fixed statistics.
+                new_entry = {}
+                new_entry['module_adjacency'] = adjacency
+                new_entry['module_operations'] = operations
+                new_entry['trainable_parameters'] = metrics.trainable_parameters
+                self.fixed_statistics[module_hash] = new_entry
+                self.computed_statistics[module_hash] = {}
 
-      self.valid_epochs.add(epochs)
+            self.valid_epochs.add(epochs)
 
-      if epochs not in self.computed_statistics[module_hash]:
-        self.computed_statistics[module_hash][epochs] = []
+            if epochs not in self.computed_statistics[module_hash]:
+                self.computed_statistics[module_hash][epochs] = []
 
-      # Each data_point consists of the metrics recorded from a single
-      # train-and-evaluation of a model at a specific epoch length.
-      data_point = {}
+            # Each data_point consists of the metrics recorded from a single
+            # train-and-evaluation of a model at a specific epoch length.
+            data_point = {}
 
-      # Note: metrics.evaluation_data[0] contains the computed metrics at the
-      # start of training (step 0) but this is unused by this API.
+            # Note: metrics.evaluation_data[0] contains the computed metrics at the
+            # start of training (step 0) but this is unused by this API.
 
-      # Evaluation statistics at the half-way point of training
-      half_evaluation = metrics.evaluation_data[1]
-      data_point['halfway_training_time'] = half_evaluation.training_time
-      data_point['halfway_train_accuracy'] = half_evaluation.train_accuracy
-      data_point['halfway_validation_accuracy'] = (
-          half_evaluation.validation_accuracy)
-      data_point['halfway_test_accuracy'] = half_evaluation.test_accuracy
+            # Evaluation statistics at the half-way point of training
+            half_evaluation = metrics.evaluation_data[1]
+            data_point['halfway_training_time'] = half_evaluation.training_time
+            data_point['halfway_train_accuracy'] = half_evaluation.train_accuracy
+            data_point['halfway_validation_accuracy'] = (
+                half_evaluation.validation_accuracy)
+            data_point['halfway_test_accuracy'] = half_evaluation.test_accuracy
 
-      # Evaluation statistics at the end of training
-      final_evaluation = metrics.evaluation_data[2]
-      data_point['final_training_time'] = final_evaluation.training_time
-      data_point['final_train_accuracy'] = final_evaluation.train_accuracy
-      data_point['final_validation_accuracy'] = (
-          final_evaluation.validation_accuracy)
-      data_point['final_test_accuracy'] = final_evaluation.test_accuracy
+            # Evaluation statistics at the end of training
+            final_evaluation = metrics.evaluation_data[2]
+            data_point['final_training_time'] = final_evaluation.training_time
+            data_point['final_train_accuracy'] = final_evaluation.train_accuracy
+            data_point['final_validation_accuracy'] = (
+                final_evaluation.validation_accuracy)
+            data_point['final_test_accuracy'] = final_evaluation.test_accuracy
 
-      self.computed_statistics[module_hash][epochs].append(data_point)
+            self.computed_statistics[module_hash][epochs].append(data_point)
 
-    elapsed = time.time() - start
-    print('Loaded dataset in %d seconds' % elapsed)
+        elapsed = time.time() - start
+        print('Loaded dataset in %d seconds' % elapsed)
 
-    self.history = {}
-    self.training_time_spent = 0.0
-    self.total_epochs_spent = 0
+        self.history = {}
+        self.training_time_spent = 0.0
+        self.total_epochs_spent = 0
 
-  def query(self, model_spec, epochs=108, stop_halfway=False):
-    """Fetch one of the evaluations for this model spec.
+    def query(self, model_spec, epochs=108, stop_halfway=False):
+        """Fetch one of the evaluations for this model spec.
 
-    Each call will sample one of the config['num_repeats'] evaluations of the
-    model. This means that repeated queries of the same model (or isomorphic
-    models) may return identical metrics.
+        Each call will sample one of the config['num_repeats'] evaluations of the
+        model. This means that repeated queries of the same model (or isomorphic
+        models) may return identical metrics.
 
-    This function will increment the budget counters for benchmarking purposes.
-    See self.training_time_spent, and self.total_epochs_spent.
+        This function will increment the budget counters for benchmarking purposes.
+        See self.training_time_spent, and self.total_epochs_spent.
 
-    This function also allows querying the evaluation metrics at the halfway
-    point of training using stop_halfway. Using this option will increment the
-    budget counters only up to the halfway point.
+        This function also allows querying the evaluation metrics at the halfway
+        point of training using stop_halfway. Using this option will increment the
+        budget counters only up to the halfway point.
 
-    Args:
-      model_spec: ModelSpec object.
-      epochs: number of epochs trained. Must be one of the evaluated number of
-        epochs, [4, 12, 36, 108] for the full dataset.
-      stop_halfway: if True, returned dict will only contain the training time
-        and accuracies at the halfway point of training (num_epochs/2).
-        Otherwise, returns the time and accuracies at the end of training
-        (num_epochs).
+        Args:
+          model_spec: ModelSpec object.
+          epochs: number of epochs trained. Must be one of the evaluated number of
+            epochs, [4, 12, 36, 108] for the full dataset.
+          stop_halfway: if True, returned dict will only contain the training time
+            and accuracies at the halfway point of training (num_epochs/2).
+            Otherwise, returns the time and accuracies at the end of training
+            (num_epochs).
 
-    Returns:
-      dict containing the evaluated data for this object.
+        Returns:
+          dict containing the evaluated data for this object.
 
-    Raises:
-      OutOfDomainError: if model_spec or num_epochs is outside the search space.
-    """
-    if epochs not in self.valid_epochs:
-      raise OutOfDomainError('invalid number of epochs, must be one of %s'
-                             % self.valid_epochs)
+        Raises:
+          OutOfDomainError: if model_spec or num_epochs is outside the search space.
+        """
+        if epochs not in self.valid_epochs:
+            raise OutOfDomainError('invalid number of epochs, must be one of %s'
+                                   % self.valid_epochs)
 
-    fixed_stat, computed_stat = self.get_metrics_from_spec(model_spec)
-    sampled_index = random.randint(0, self.config['num_repeats'] - 1)
-    computed_stat = computed_stat[epochs][sampled_index]
+        fixed_stat, computed_stat = self.get_metrics_from_spec(model_spec)
+        sampled_index = random.randint(0, self.config['num_repeats'] - 1)
+        computed_stat = computed_stat[epochs][sampled_index]
 
-    data = {}
-    data['module_adjacency'] = fixed_stat['module_adjacency']
-    data['module_operations'] = fixed_stat['module_operations']
-    data['trainable_parameters'] = fixed_stat['trainable_parameters']
+        data = {}
+        data['module_adjacency'] = fixed_stat['module_adjacency']
+        data['module_operations'] = fixed_stat['module_operations']
+        data['trainable_parameters'] = fixed_stat['trainable_parameters']
 
-    if stop_halfway:
-      data['training_time'] = computed_stat['halfway_training_time']
-      data['train_accuracy'] = computed_stat['halfway_train_accuracy']
-      data['validation_accuracy'] = computed_stat['halfway_validation_accuracy']
-      data['test_accuracy'] = computed_stat['halfway_test_accuracy']
-    else:
-      data['training_time'] = computed_stat['final_training_time']
-      data['train_accuracy'] = computed_stat['final_train_accuracy']
-      data['validation_accuracy'] = computed_stat['final_validation_accuracy']
-      data['test_accuracy'] = computed_stat['final_test_accuracy']
+        if stop_halfway:
+            data['training_time'] = computed_stat['halfway_training_time']
+            data['train_accuracy'] = computed_stat['halfway_train_accuracy']
+            data['validation_accuracy'] = computed_stat['halfway_validation_accuracy']
+            data['test_accuracy'] = computed_stat['halfway_test_accuracy']
+        else:
+            data['training_time'] = computed_stat['final_training_time']
+            data['train_accuracy'] = computed_stat['final_train_accuracy']
+            data['validation_accuracy'] = computed_stat['final_validation_accuracy']
+            data['test_accuracy'] = computed_stat['final_test_accuracy']
 
-    self.training_time_spent += data['training_time']
-    if stop_halfway:
-      self.total_epochs_spent += epochs // 2
-    else:
-      self.total_epochs_spent += epochs
+        self.training_time_spent += data['training_time']
+        if stop_halfway:
+            self.total_epochs_spent += epochs // 2
+        else:
+            self.total_epochs_spent += epochs
 
-    return data
+        return data
 
-  def is_valid(self, model_spec):
-    """Checks the validity of the model_spec.
+    def is_valid(self, model_spec):
+        """Checks the validity of the model_spec.
 
-    For the purposes of benchmarking, this does not increment the budget
-    counters.
+        For the purposes of benchmarking, this does not increment the budget
+        counters.
 
-    Args:
-      model_spec: ModelSpec object.
+        Args:
+          model_spec: ModelSpec object.
 
-    Returns:
-      True if model is within space.
-    """
-    try:
-      self._check_spec(model_spec)
-    except OutOfDomainError:
-      return False
+        Returns:
+          True if model is within space.
+        """
+        try:
+            self._check_spec(model_spec)
+        except OutOfDomainError:
+            return False
 
-    return True
+        return True
 
-  def get_budget_counters(self):
-    """Returns the time and budget counters."""
-    return self.training_time_spent, self.total_epochs_spent
+    def get_budget_counters(self):
+        """Returns the time and budget counters."""
+        return self.training_time_spent, self.total_epochs_spent
 
-  def reset_budget_counters(self):
-    """Reset the time and epoch budget counters."""
-    self.training_time_spent = 0.0
-    self.total_epochs_spent = 0
+    def reset_budget_counters(self):
+        """Reset the time and epoch budget counters."""
+        self.training_time_spent = 0.0
+        self.total_epochs_spent = 0
 
-  def evaluate(self, model_spec, model_dir):
-    """Trains and evaluates a model spec from scratch (does not query dataset).
+    def evaluate(self, model_spec, model_dir):
+        """Trains and evaluates a model spec from scratch (does not query dataset).
 
-    This function runs the same procedure that was used to generate each
-    evaluation in the dataset.  Because we are not querying the generated
-    dataset of trained models, there are no limitations on number of vertices,
-    edges, operations, or epochs. Note that the results will not exactly match
-    the dataset due to randomness. By default, this uses TPUs for evaluation but
-    CPU/GPU can be used by setting --use_tpu=false (GPU will require installing
-    tensorflow-gpu).
+        This function runs the same procedure that was used to generate each
+        evaluation in the dataset.  Because we are not querying the generated
+        dataset of trained models, there are no limitations on number of vertices,
+        edges, operations, or epochs. Note that the results will not exactly match
+        the dataset due to randomness. By default, this uses TPUs for evaluation but
+        CPU/GPU can be used by setting --use_tpu=false (GPU will require installing
+        tensorflow-gpu).
 
-    Args:
-      model_spec: ModelSpec object.
-      model_dir: directory to store the checkpoints, summaries, and logs.
+        Args:
+          model_spec: ModelSpec object.
+          model_dir: directory to store the checkpoints, summaries, and logs.
 
-    Returns:
-      dict contained the evaluated data for this object, same structure as
-      returned by query().
-    """
-    # Metadata contains additional metrics that aren't reported normally.
-    # However, these are stored in the JSON file at the model_dir.
-    metadata = evaluate.train_and_evaluate(model_spec, self.config, model_dir)
-    metadata_file = os.path.join(model_dir, 'metadata.json')
-    with tf.gfile.Open(metadata_file, 'w') as f:
-      json.dump(metadata, f, cls=_NumpyEncoder)
+        Returns:
+          dict contained the evaluated data for this object, same structure as
+          returned by query().
+        """
+        # Metadata contains additional metrics that aren't reported normally.
+        # However, these are stored in the JSON file at the model_dir.
+        metadata = evaluate.train_and_evaluate(model_spec, self.config, model_dir)
+        metadata_file = os.path.join(model_dir, 'metadata.json')
+        with tf.gfile.Open(metadata_file, 'w') as f:
+            json.dump(metadata, f, cls=_NumpyEncoder)
 
-    data_point = {}
-    data_point['module_adjacency'] = model_spec.matrix
-    data_point['module_operations'] = model_spec.ops
-    data_point['trainable_parameters'] = metadata['trainable_params']
+        data_point = {}
+        data_point['module_adjacency'] = model_spec.matrix
+        data_point['module_operations'] = model_spec.ops
+        data_point['trainable_parameters'] = metadata['trainable_params']
 
-    final_evaluation = metadata['evaluation_results'][-1]
-    data_point['training_time'] = final_evaluation['training_time']
-    data_point['train_accuracy'] = final_evaluation['train_accuracy']
-    data_point['validation_accuracy'] = final_evaluation['validation_accuracy']
-    data_point['test_accuracy'] = final_evaluation['test_accuracy']
+        final_evaluation = metadata['evaluation_results'][-1]
+        data_point['training_time'] = final_evaluation['training_time']
+        data_point['train_accuracy'] = final_evaluation['train_accuracy']
+        data_point['validation_accuracy'] = final_evaluation['validation_accuracy']
+        data_point['test_accuracy'] = final_evaluation['test_accuracy']
 
-    return data_point
+        return data_point
 
-  def hash_iterator(self):
-    """Returns iterator over all unique model hashes."""
-    return self.fixed_statistics.keys()
+    def hash_iterator(self):
+        """Returns iterator over all unique model hashes."""
+        return self.fixed_statistics.keys()
 
-  def get_metrics_from_hash(self, module_hash):
-    """Returns the metrics for all epochs and all repeats of a hash.
+    def get_metrics_from_hash(self, module_hash):
+        """Returns the metrics for all epochs and all repeats of a hash.
 
-    This method is for dataset analysis and should not be used for benchmarking.
-    As such, it does not increment any of the budget counters.
+        This method is for dataset analysis and should not be used for benchmarking.
+        As such, it does not increment any of the budget counters.
 
-    Args:
-      module_hash: MD5 hash, i.e., the values yielded by hash_iterator().
+        Args:
+          module_hash: MD5 hash, i.e., the values yielded by hash_iterator().
 
-    Returns:
-      fixed stats and computed stats of the model spec provided.
-    """
-    fixed_stat = copy.deepcopy(self.fixed_statistics[module_hash])
-    computed_stat = copy.deepcopy(self.computed_statistics[module_hash])
-    return fixed_stat, computed_stat
+        Returns:
+          fixed stats and computed stats of the model spec provided.
+        """
+        fixed_stat = copy.deepcopy(self.fixed_statistics[module_hash])
+        computed_stat = copy.deepcopy(self.computed_statistics[module_hash])
+        return fixed_stat, computed_stat
 
-  def get_metrics_from_spec(self, model_spec):
-    """Returns the metrics for all epochs and all repeats of a model.
+    def get_metrics_from_spec(self, model_spec):
+        """Returns the metrics for all epochs and all repeats of a model.
 
-    This method is for dataset analysis and should not be used for benchmarking.
-    As such, it does not increment any of the budget counters.
+        This method is for dataset analysis and should not be used for benchmarking.
+        As such, it does not increment any of the budget counters.
 
-    Args:
-      model_spec: ModelSpec object.
+        Args:
+          model_spec: ModelSpec object.
 
-    Returns:
-      fixed stats and computed stats of the model spec provided.
-    """
-    self._check_spec(model_spec)
-    module_hash = self._hash_spec(model_spec)
-    return self.get_metrics_from_hash(module_hash)
+        Returns:
+          fixed stats and computed stats of the model spec provided.
+        """
+        self._check_spec(model_spec)
+        module_hash = self._hash_spec(model_spec)
+        return self.get_metrics_from_hash(module_hash)
 
-  def _check_spec(self, model_spec):
-    """Checks that the model spec is within the dataset."""
-    if not model_spec.valid_spec:
-      raise OutOfDomainError('invalid spec, provided graph is disconnected.')
+    def _check_spec(self, model_spec):
+        """Checks that the model spec is within the dataset."""
+        if not model_spec.valid_spec:
+            raise OutOfDomainError('invalid spec, provided graph is disconnected.')
 
-    num_vertices = len(model_spec.ops)
-    num_edges = np.sum(model_spec.matrix)
+        num_vertices = len(model_spec.ops)
+        num_edges = np.sum(model_spec.matrix)
 
-    if num_vertices > self.config['module_vertices']:
-      raise OutOfDomainError('too many vertices, got %d (max vertices = %d)'
-                             % (num_vertices, config['module_vertices']))
+        if num_vertices > self.config['module_vertices']:
+            raise OutOfDomainError('too many vertices, got %d (max vertices = %d)'
+                                   % (num_vertices, config['module_vertices']))
 
-    if num_edges > self.config['max_edges']:
-      raise OutOfDomainError('too many edges, got %d (max edges = %d)'
-                             % (num_edges, self.config['max_edges']))
+        if num_edges > self.config['max_edges']:
+            raise OutOfDomainError('too many edges, got %d (max edges = %d)'
+                                   % (num_edges, self.config['max_edges']))
 
-    if model_spec.ops[0] != 'input':
-      raise OutOfDomainError('first operation should be \'input\'')
-    if model_spec.ops[-1] != 'output':
-      raise OutOfDomainError('last operation should be \'output\'')
-    for op in model_spec.ops[1:-1]:
-      if op not in self.config['available_ops']:
-        raise OutOfDomainError('unsupported op %s (available ops = %s)'
-                               % (op, self.config['available_ops']))
+        if model_spec.ops[0] != 'input':
+            raise OutOfDomainError('first operation should be \'input\'')
+        if model_spec.ops[-1] != 'output':
+            raise OutOfDomainError('last operation should be \'output\'')
+        for op in model_spec.ops[1:-1]:
+            if op not in self.config['available_ops']:
+                raise OutOfDomainError('unsupported op %s (available ops = %s)'
+                                       % (op, self.config['available_ops']))
 
-  def _hash_spec(self, model_spec):
-    """Returns the MD5 hash for a provided model_spec."""
-    return model_spec.hash_spec(self.config['available_ops'])
+    def _hash_spec(self, model_spec):
+        """Returns the MD5 hash for a provided model_spec."""
+        return model_spec.hash_spec(self.config['available_ops'])
 
 
 class _NumpyEncoder(json.JSONEncoder):
-  """Converts numpy objects to JSON-serializable format."""
+    """Converts numpy objects to JSON-serializable format."""
 
-  def default(self, obj):
-    if isinstance(obj, np.ndarray):
-      # Matrices converted to nested lists
-      return obj.tolist()
-    elif isinstance(obj, np.generic):
-      # Scalars converted to closest Python type
-      return np.asscalar(obj)
-    return json.JSONEncoder.default(self, obj)
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            # Matrices converted to nested lists
+            return obj.tolist()
+        elif isinstance(obj, np.generic):
+            # Scalars converted to closest Python type
+            return np.asscalar(obj)
+        return json.JSONEncoder.default(self, obj)

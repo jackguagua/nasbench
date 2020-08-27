@@ -20,7 +20,7 @@ from __future__ import print_function
 
 from nasbench.lib import model_spec
 import numpy as np
-import tensorflow as tf   # Used only for tf.test
+import tensorflow.compat.v1 as tf   # Used only for tf.test
 
 
 class ModelSpecTest(tf.test.TestCase):
